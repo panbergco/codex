@@ -1,5 +1,6 @@
 use crate::TelemetryAuthMode;
 use crate::ToolDecisionSource;
+use crate::events::image_input_telemetry::image_input_telemetry;
 use crate::events::shared::log_and_trace_event;
 use crate::events::shared::log_event;
 use crate::events::shared::trace_event;
@@ -855,6 +856,7 @@ impl SessionTelemetry {
             .iter()
             .filter(|item| matches!(item, UserInput::LocalImage { .. }))
             .count();
+        let image_telemetry = image_input_telemetry(items);
 
         let prompt_to_log = if self.metadata.log_user_prompts {
             prompt.as_str()
@@ -868,14 +870,28 @@ impl SessionTelemetry {
             prompt_length = %prompt.chars().count(),
             prompt = %prompt_to_log,
         );
-        trace_event!(
-            self,
-            event.name = "codex.user_prompt",
-            prompt_length = %prompt.chars().count(),
-            text_input_count = text_input_count as i64,
-            image_input_count = image_input_count as i64,
-            local_image_input_count = local_image_input_count as i64,
-        );
+        if let Some(image_telemetry) = image_telemetry {
+            trace_event!(
+                self,
+                event.name = "codex.user_prompt",
+                prompt_length = %prompt.chars().count(),
+                text_input_count = text_input_count as i64,
+                image_input_count = image_input_count as i64,
+                local_image_input_count = local_image_input_count as i64,
+                image_input_types = %image_telemetry.image_types,
+                image_input_mime_types = %image_telemetry.mime_types,
+                image_input_details = %image_telemetry.details_json,
+            );
+        } else {
+            trace_event!(
+                self,
+                event.name = "codex.user_prompt",
+                prompt_length = %prompt.chars().count(),
+                text_input_count = text_input_count as i64,
+                image_input_count = image_input_count as i64,
+                local_image_input_count = local_image_input_count as i64,
+            );
+        }
     }
 
     pub fn tool_decision(

@@ -11,9 +11,11 @@ use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::trace::InMemorySpanExporter;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use pretty_assertions::assert_eq;
+use serde_json::Value;
+use serde_json::json;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::fs;
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::SubscriberExt;
@@ -93,6 +95,18 @@ fn auth_env_metadata() -> AuthEnvTelemetryMetadata {
 
 #[test]
 fn otel_export_routing_policy_routes_user_prompt_log_and_trace_events() {
+    let local_png = std::env::temp_dir().join(format!(
+        "codex-otel-user-prompt-image-{}.png",
+        std::process::id()
+    ));
+    fs::write(
+        &local_png,
+        [
+            0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n', 0x00, 0x00, 0x00, 0x0d, b'I', b'H',
+            b'D', b'R', 0x00, 0x00, 0x02, 0x80, 0x00, 0x00, 0x01, 0xe0,
+        ],
+    )
+    .expect("write local png header");
     let log_exporter = InMemoryLogExporter::default();
     let logger_provider = SdkLoggerProvider::builder()
         .with_simple_exporter(log_exporter.clone())
@@ -138,10 +152,13 @@ fn otel_export_routing_policy_routes_user_prompt_log_and_trace_events() {
                 text_elements: Vec::new(),
             },
             UserInput::Image {
-                image_url: "https://example.com/image.png".to_string(),
+                image_url: "DATA:image/jpeg;BASE64,AAAA".to_string(),
+            },
+            UserInput::Image {
+                image_url: "https://example.com/image.customer-secret".to_string(),
             },
             UserInput::LocalImage {
-                path: PathBuf::from("/tmp/secret.png"),
+                path: local_png.clone(),
             },
         ]);
     });
@@ -187,7 +204,7 @@ fn otel_export_routing_policy_routes_user_prompt_log_and_trace_events() {
         prompt_trace_attrs
             .get("image_input_count")
             .map(String::as_str),
-        Some("1")
+        Some("2")
     );
     assert_eq!(
         prompt_trace_attrs
@@ -195,9 +212,55 @@ fn otel_export_routing_policy_routes_user_prompt_log_and_trace_events() {
             .map(String::as_str),
         Some("1")
     );
+    assert_eq!(
+        prompt_trace_attrs
+            .get("image_input_types")
+            .map(String::as_str),
+        Some("jpeg,png")
+    );
+    assert_eq!(
+        prompt_trace_attrs
+            .get("image_input_mime_types")
+            .map(String::as_str),
+        Some("image/jpeg,image/png")
+    );
+    let image_input_details: Value = serde_json::from_str(
+        prompt_trace_attrs
+            .get("image_input_details")
+            .expect("image input details"),
+    )
+    .expect("image input details should be json");
+    assert_eq!(
+        image_input_details,
+        json!([
+            {
+                "source": "data_url",
+                "image_type": "jpeg",
+                "mime_type": "image/jpeg",
+                "byte_length": 3
+            },
+            {
+                "source": "remote_url"
+            },
+            {
+                "source": "local_file",
+                "image_type": "png",
+                "mime_type": "image/png",
+                "width": 640,
+                "height": 480,
+                "byte_length": 24,
+                "extension": "png"
+            }
+        ])
+    );
+    assert!(
+        !prompt_trace_attrs["image_input_details"].contains("customer-secret"),
+        "unknown remote URL suffixes should not be traced"
+    );
     assert!(!prompt_trace_attrs.contains_key("prompt"));
     assert!(!prompt_trace_attrs.contains_key("user.email"));
     assert!(!prompt_trace_attrs.contains_key("user.account_id"));
+    fs::remove_file(local_png).expect("remove local png header");
 }
 
 #[test]
