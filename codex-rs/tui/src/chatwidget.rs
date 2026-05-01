@@ -6170,6 +6170,7 @@ impl ChatWidget {
                 self.on_request_user_input(params);
             }
             ServerRequest::DynamicToolCall { .. }
+            | ServerRequest::AttestationGenerate { .. }
             | ServerRequest::ChatgptAuthTokensRefresh { .. }
             | ServerRequest::ApplyPatchApproval { .. }
             | ServerRequest::ExecCommandApproval { .. } => {
