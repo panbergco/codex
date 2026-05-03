@@ -141,7 +141,7 @@ async fn guardian_approved_exec_renders_approved_request() {
 
     let width: u16 = 120;
     let ui_height: u16 = chat.desired_height(width);
-    let vt_height: u16 = 12;
+    let vt_height: u16 = ui_height.saturating_add(1).max(12);
     let viewport = Rect::new(0, vt_height - ui_height - 1, width, ui_height);
 
     let backend = VT100Backend::new(width, vt_height);
@@ -215,7 +215,7 @@ async fn guardian_approved_request_permissions_renders_request_summary() {
 
     let width: u16 = 110;
     let ui_height: u16 = chat.desired_height(width);
-    let vt_height: u16 = 12;
+    let vt_height: u16 = ui_height.saturating_add(1).max(12);
     let viewport = Rect::new(0, vt_height - ui_height - 1, width, ui_height);
 
     let backend = VT100Backend::new(width, vt_height);
@@ -392,7 +392,7 @@ async fn app_server_guardian_review_denied_renders_denied_request_snapshot() {
 
     let width: u16 = 140;
     let ui_height: u16 = chat.desired_height(width);
-    let vt_height: u16 = 16;
+    let vt_height: u16 = ui_height.saturating_add(1).max(16);
     let viewport = Rect::new(0, vt_height - ui_height - 1, width, ui_height);
 
     let backend = VT100Backend::new(width, vt_height);
@@ -470,7 +470,7 @@ async fn app_server_guardian_review_timed_out_renders_timed_out_request_snapshot
 
     let width: u16 = 140;
     let ui_height: u16 = chat.desired_height(width);
-    let vt_height: u16 = 16;
+    let vt_height: u16 = ui_height.saturating_add(1).max(16);
     let viewport = Rect::new(0, vt_height - ui_height - 1, width, ui_height);
 
     let backend = VT100Backend::new(width, vt_height);

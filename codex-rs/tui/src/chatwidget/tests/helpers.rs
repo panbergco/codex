@@ -183,6 +183,7 @@ pub(super) async fn make_chatwidget_manual(
     let current_collaboration_mode = base_mode;
     let active_collaboration_mask = collaboration_modes::default_mask(model_catalog.as_ref());
     let effective_service_tier = cfg.service_tier;
+    let ambient_pet = load_ambient_pet(&cfg, FrameRequester::test_dummy());
     let mut widget = ChatWidget {
         app_event_tx,
         codex_op_target: super::CodexOpTarget::Direct(op_tx),
@@ -258,6 +259,7 @@ pub(super) async fn make_chatwidget_manual(
         full_reasoning_buffer: String::new(),
         current_status: StatusIndicatorState::working(),
         active_hook_cell: None,
+        ambient_pet,
         retry_status_header: None,
         pending_status_indicator_restore: false,
         suppress_queue_autosend: false,

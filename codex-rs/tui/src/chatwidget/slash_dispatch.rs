@@ -390,6 +390,9 @@ impl ChatWidget {
             SlashCommand::Theme => {
                 self.open_theme_picker();
             }
+            SlashCommand::Pets => {
+                self.open_pets_picker();
+            }
             SlashCommand::Ps => {
                 self.add_ps_output();
             }
@@ -776,6 +779,10 @@ impl ChatWidget {
                 self.app_event_tx
                     .send(AppEvent::BeginWindowsSandboxGrantReadRoot { path: args });
             }
+            SlashCommand::Pets if !trimmed.is_empty() => {
+                self.app_event_tx
+                    .send(AppEvent::PetSelected { pet_id: args });
+            }
             _ => self.dispatch_command(cmd),
         }
         if source == SlashCommandDispatchSource::Live && cmd != SlashCommand::Goal {
@@ -946,7 +953,8 @@ impl ChatWidget {
             | SlashCommand::Hooks
             | SlashCommand::Title
             | SlashCommand::Statusline
-            | SlashCommand::Theme => QueueDrain::Stop,
+            | SlashCommand::Theme
+            | SlashCommand::Pets => QueueDrain::Stop,
         }
     }
 
