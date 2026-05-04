@@ -22,6 +22,10 @@ use tracing_subscriber::layer::SubscriberExt;
 
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::FunctionCallOutputContentItem;
+use codex_protocol::models::FunctionCallOutputPayload;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionSource;
@@ -37,6 +41,13 @@ fn log_attributes(record: &SdkLogRecord) -> BTreeMap<String, String> {
 fn span_event_attributes(event: &opentelemetry::trace::Event) -> BTreeMap<String, String> {
     event
         .attributes
+        .iter()
+        .map(|KeyValue { key, value, .. }| (key.as_str().to_string(), value.to_string()))
+        .collect()
+}
+
+fn span_attributes(span: &opentelemetry_sdk::trace::SpanData) -> BTreeMap<String, String> {
+    span.attributes
         .iter()
         .map(|KeyValue { key, value, .. }| (key.as_str().to_string(), value.to_string()))
         .collect()
@@ -146,7 +157,7 @@ fn otel_export_routing_policy_routes_user_prompt_log_and_trace_events() {
         );
         let root_span = tracing::info_span!("root");
         let _root_guard = root_span.enter();
-        manager.user_prompt(&[
+        let items = [
             UserInput::Text {
                 text: "super secret prompt".to_string(),
                 text_elements: Vec::new(),
@@ -160,7 +171,52 @@ fn otel_export_routing_policy_routes_user_prompt_log_and_trace_events() {
             UserInput::LocalImage {
                 path: local_png.clone(),
             },
-        ]);
+        ];
+        let turn_span = tracing::info_span!(
+            "turn",
+            otel.name = "session_task.turn",
+            codex.turn.model_input_image_count = tracing::field::Empty,
+            codex.turn.model_input_user_image_count = tracing::field::Empty,
+            codex.turn.model_input_tool_image_count = tracing::field::Empty,
+            codex.turn.model_input_image_types = tracing::field::Empty,
+            codex.turn.model_input_image_mime_types = tracing::field::Empty,
+            codex.turn.model_input_image_details = tracing::field::Empty,
+        );
+        let model_input = vec![
+            ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![
+                    ContentItem::InputText {
+                        text: "super secret prompt".to_string(),
+                    },
+                    ContentItem::InputImage {
+                        image_url: "DATA:image/jpeg;BASE64,AAAA".to_string(),
+                        detail: None,
+                    },
+                    ContentItem::InputImage {
+                        image_url: "https://example.com/image.customer-secret".to_string(),
+                        detail: None,
+                    },
+                ],
+                phase: None,
+            },
+            ResponseItem::FunctionCallOutput {
+                call_id: "call_1".to_string(),
+                output: FunctionCallOutputPayload::from_content_items(vec![
+                    FunctionCallOutputContentItem::InputText {
+                        text: "page screenshot".to_string(),
+                    },
+                    FunctionCallOutputContentItem::InputImage {
+                        image_url: "data:image/png;base64,AAAA".to_string(),
+                        detail: None,
+                    },
+                ]),
+            },
+        ];
+        manager.record_model_input_images(&turn_span, &model_input);
+        manager.user_prompt(&items);
+        let _turn_guard = turn_span.enter();
     });
 
     logger_provider.force_flush().expect("flush logs");
@@ -184,8 +240,12 @@ fn otel_export_routing_policy_routes_user_prompt_log_and_trace_events() {
     );
 
     let spans = span_exporter.get_finished_spans().expect("span export");
-    assert_eq!(spans.len(), 1);
-    let span_events = &spans[0].events.events;
+    assert_eq!(spans.len(), 2);
+    let root_span = spans
+        .iter()
+        .find(|span| span.name == "root")
+        .expect("missing root span");
+    let span_events = &root_span.events.events;
     assert_eq!(span_events.len(), 1);
 
     let prompt_trace_event = find_span_event_by_name_attr(span_events, "codex.user_prompt");
@@ -212,21 +272,48 @@ fn otel_export_routing_policy_routes_user_prompt_log_and_trace_events() {
             .map(String::as_str),
         Some("1")
     );
+    assert!(!prompt_trace_attrs.contains_key("image_input_types"));
+    assert!(!prompt_trace_attrs.contains_key("image_input_mime_types"));
+    assert!(!prompt_trace_attrs.contains_key("image_input_details"));
+
+    let turn_span = spans
+        .iter()
+        .find(|span| span.name == "session_task.turn")
+        .expect("missing turn span");
+    let turn_attrs = span_attributes(turn_span);
     assert_eq!(
-        prompt_trace_attrs
-            .get("image_input_types")
+        turn_attrs
+            .get("codex.turn.model_input_image_count")
+            .map(String::as_str),
+        Some("3")
+    );
+    assert_eq!(
+        turn_attrs
+            .get("codex.turn.model_input_user_image_count")
+            .map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        turn_attrs
+            .get("codex.turn.model_input_tool_image_count")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        turn_attrs
+            .get("codex.turn.model_input_image_types")
             .map(String::as_str),
         Some("jpeg,png")
     );
     assert_eq!(
-        prompt_trace_attrs
-            .get("image_input_mime_types")
+        turn_attrs
+            .get("codex.turn.model_input_image_mime_types")
             .map(String::as_str),
         Some("image/jpeg,image/png")
     );
     let image_input_details: Value = serde_json::from_str(
-        prompt_trace_attrs
-            .get("image_input_details")
+        turn_attrs
+            .get("codex.turn.model_input_image_details")
             .expect("image input details"),
     )
     .expect("image input details should be json");
@@ -234,27 +321,24 @@ fn otel_export_routing_policy_routes_user_prompt_log_and_trace_events() {
         image_input_details,
         json!([
             {
-                "source": "data_url",
+                "source": "message",
                 "image_type": "jpeg",
                 "mime_type": "image/jpeg",
                 "byte_length": 3
             },
             {
-                "source": "remote_url"
+                "source": "message"
             },
             {
-                "source": "local_file",
+                "source": "tool_output",
                 "image_type": "png",
                 "mime_type": "image/png",
-                "width": 640,
-                "height": 480,
-                "byte_length": 24,
-                "extension": "png"
+                "byte_length": 3
             }
         ])
     );
     assert!(
-        !prompt_trace_attrs["image_input_details"].contains("customer-secret"),
+        !turn_attrs["codex.turn.model_input_image_details"].contains("customer-secret"),
         "unknown remote URL suffixes should not be traced"
     );
     assert!(!prompt_trace_attrs.contains_key("prompt"));
@@ -519,6 +603,113 @@ fn otel_export_routing_policy_routes_auth_recovery_log_and_trace_events() {
             .get("auth.state_changed")
             .map(String::as_str),
         Some("true")
+    );
+}
+
+#[test]
+fn record_model_input_images_clears_detail_fields_when_retry_has_no_images() {
+    let span_exporter = InMemorySpanExporter::default();
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_simple_exporter(span_exporter.clone())
+        .build();
+    let tracer = tracer_provider.tracer("model-input-image-retry-test");
+
+    let subscriber =
+        tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+    tracing::subscriber::with_default(subscriber, || {
+        tracing::callsite::rebuild_interest_cache();
+        let manager = SessionTelemetry::new(
+            ThreadId::new(),
+            "gpt-5.1",
+            "gpt-5.1",
+            Some("account-id".to_string()),
+            Some("engineer@example.com".to_string()),
+            Some(TelemetryAuthMode::Chatgpt),
+            "codex_exec".to_string(),
+            /*log_user_prompts*/ false,
+            "tty".to_string(),
+            SessionSource::Cli,
+        );
+        let turn_span = tracing::info_span!(
+            "turn",
+            otel.name = "session_task.turn",
+            codex.turn.model_input_image_count = tracing::field::Empty,
+            codex.turn.model_input_user_image_count = tracing::field::Empty,
+            codex.turn.model_input_tool_image_count = tracing::field::Empty,
+            codex.turn.model_input_image_types = tracing::field::Empty,
+            codex.turn.model_input_image_mime_types = tracing::field::Empty,
+            codex.turn.model_input_image_details = tracing::field::Empty,
+        );
+        manager.record_model_input_images(
+            &turn_span,
+            &[ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputImage {
+                    image_url: "data:image/png;base64,AAAA".to_string(),
+                    detail: None,
+                }],
+                phase: None,
+            }],
+        );
+        manager.record_model_input_images(
+            &turn_span,
+            &[ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "retry after image sanitization".to_string(),
+                }],
+                phase: None,
+            }],
+        );
+        let _turn_guard = turn_span.enter();
+    });
+
+    tracer_provider.force_flush().expect("flush traces");
+
+    let spans = span_exporter.get_finished_spans().expect("span export");
+    let turn_span = spans
+        .iter()
+        .find(|span| span.name == "session_task.turn")
+        .expect("missing turn span");
+    let turn_attrs = span_attributes(turn_span);
+    assert_eq!(
+        turn_attrs
+            .get("codex.turn.model_input_image_count")
+            .map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        turn_attrs
+            .get("codex.turn.model_input_user_image_count")
+            .map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        turn_attrs
+            .get("codex.turn.model_input_tool_image_count")
+            .map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        turn_attrs
+            .get("codex.turn.model_input_image_types")
+            .map(String::as_str),
+        Some("")
+    );
+    assert_eq!(
+        turn_attrs
+            .get("codex.turn.model_input_image_mime_types")
+            .map(String::as_str),
+        Some("")
+    );
+    assert_eq!(
+        turn_attrs
+            .get("codex.turn.model_input_image_details")
+            .map(String::as_str),
+        Some("")
     );
 }
 

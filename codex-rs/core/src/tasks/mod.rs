@@ -360,10 +360,6 @@ impl Session {
         let turn = active.get_or_insert_with(ActiveTurn::default);
         debug_assert!(turn.tasks.is_empty());
         let done_clone = Arc::clone(&done);
-        let session_ctx = Arc::new(SessionTaskContext::new(Arc::clone(self)));
-        let ctx = Arc::clone(&turn_context);
-        let task_for_run = Arc::clone(&task);
-        let task_cancellation_token = cancellation_token.child_token();
         // Task-owned turn spans keep a core-owned span open for the
         // full task lifecycle after the submission dispatch span ends.
         let reasoning_effort = turn_context.effective_reasoning_effort_for_tracing();
@@ -380,7 +376,18 @@ impl Session {
             codex.turn.token_usage.output_tokens = field::Empty,
             codex.turn.token_usage.reasoning_output_tokens = field::Empty,
             codex.turn.token_usage.total_tokens = field::Empty,
+            codex.turn.model_input_image_count = field::Empty,
+            codex.turn.model_input_user_image_count = field::Empty,
+            codex.turn.model_input_tool_image_count = field::Empty,
+            codex.turn.model_input_image_types = field::Empty,
+            codex.turn.model_input_image_mime_types = field::Empty,
+            codex.turn.model_input_image_details = field::Empty,
         );
+        turn_context.set_turn_span(task_span.clone());
+        let session_ctx = Arc::new(SessionTaskContext::new(Arc::clone(self)));
+        let ctx = Arc::clone(&turn_context);
+        let task_for_run = Arc::clone(&task);
+        let task_cancellation_token = cancellation_token.child_token();
         let handle = tokio::spawn(
             async move {
                 let ctx_for_finish = Arc::clone(&ctx);

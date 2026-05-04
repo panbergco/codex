@@ -1,6 +1,6 @@
 use crate::TelemetryAuthMode;
 use crate::ToolDecisionSource;
-use crate::events::image_input_telemetry::image_input_telemetry;
+use crate::events::image_input_telemetry::model_input_image_telemetry;
 use crate::events::shared::log_and_trace_event;
 use crate::events::shared::log_event;
 use crate::events::shared::trace_event;
@@ -856,7 +856,6 @@ impl SessionTelemetry {
             .iter()
             .filter(|item| matches!(item, UserInput::LocalImage { .. }))
             .count();
-        let image_telemetry = image_input_telemetry(items);
 
         let prompt_to_log = if self.metadata.log_user_prompts {
             prompt.as_str()
@@ -870,28 +869,44 @@ impl SessionTelemetry {
             prompt_length = %prompt.chars().count(),
             prompt = %prompt_to_log,
         );
-        if let Some(image_telemetry) = image_telemetry {
-            trace_event!(
-                self,
-                event.name = "codex.user_prompt",
-                prompt_length = %prompt.chars().count(),
-                text_input_count = text_input_count as i64,
-                image_input_count = image_input_count as i64,
-                local_image_input_count = local_image_input_count as i64,
-                image_input_types = %image_telemetry.image_types,
-                image_input_mime_types = %image_telemetry.mime_types,
-                image_input_details = %image_telemetry.details_json,
-            );
-        } else {
-            trace_event!(
-                self,
-                event.name = "codex.user_prompt",
-                prompt_length = %prompt.chars().count(),
-                text_input_count = text_input_count as i64,
-                image_input_count = image_input_count as i64,
-                local_image_input_count = local_image_input_count as i64,
-            );
-        }
+        trace_event!(
+            self,
+            event.name = "codex.user_prompt",
+            prompt_length = %prompt.chars().count(),
+            text_input_count = text_input_count as i64,
+            image_input_count = image_input_count as i64,
+            local_image_input_count = local_image_input_count as i64,
+        );
+    }
+
+    pub fn record_model_input_images(&self, turn_span: &Span, items: &[ResponseItem]) {
+        let image_telemetry = model_input_image_telemetry(items);
+        let total_image_count =
+            image_telemetry.user_message_image_count + image_telemetry.tool_output_image_count;
+        let image_types = image_telemetry.image_types.join(",");
+        let mime_types = image_telemetry.mime_types.join(",");
+
+        turn_span.record(
+            "codex.turn.model_input_image_count",
+            total_image_count as i64,
+        );
+        turn_span.record(
+            "codex.turn.model_input_user_image_count",
+            image_telemetry.user_message_image_count as i64,
+        );
+        turn_span.record(
+            "codex.turn.model_input_tool_image_count",
+            image_telemetry.tool_output_image_count as i64,
+        );
+        turn_span.record("codex.turn.model_input_image_types", image_types.as_str());
+        turn_span.record(
+            "codex.turn.model_input_image_mime_types",
+            mime_types.as_str(),
+        );
+        turn_span.record(
+            "codex.turn.model_input_image_details",
+            image_telemetry.details_json.as_str(),
+        );
     }
 
     pub fn tool_decision(

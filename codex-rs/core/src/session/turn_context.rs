@@ -9,6 +9,7 @@ use codex_sandboxing::compatibility_sandbox_policy_for_permission_profile;
 use codex_sandboxing::policy_transforms::effective_file_system_sandbox_policy;
 use codex_sandboxing::policy_transforms::effective_network_sandbox_policy;
 use codex_tools::ToolEnvironmentMode;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
@@ -92,6 +93,7 @@ pub(crate) struct TurnContext {
     pub(crate) turn_metadata_state: Arc<TurnMetadataState>,
     pub(crate) turn_skills: TurnSkillsContext,
     pub(crate) turn_timing_state: Arc<TurnTimingState>,
+    pub(crate) turn_span: OnceLock<tracing::Span>,
     pub(crate) server_model_warning_emitted: AtomicBool,
     pub(crate) model_verification_emitted: AtomicBool,
 }
@@ -106,6 +108,17 @@ impl TurnContext {
 
     pub(crate) fn network_sandbox_policy(&self) -> NetworkSandboxPolicy {
         self.permission_profile.network_sandbox_policy()
+    }
+
+    pub(crate) fn set_turn_span(&self, span: tracing::Span) {
+        let _ = self.turn_span.set(span);
+    }
+
+    pub(crate) fn turn_span(&self) -> tracing::Span {
+        self.turn_span
+            .get()
+            .cloned()
+            .unwrap_or_else(tracing::Span::none)
     }
 
     pub(crate) fn sandbox_policy(&self) -> SandboxPolicy {
@@ -232,6 +245,11 @@ impl TurnContext {
             &config.agent_roles,
         ));
 
+        let turn_span = OnceLock::new();
+        if let Some(span) = self.turn_span.get() {
+            let _ = turn_span.set(span.clone());
+        }
+
         Self {
             sub_id: self.sub_id.clone(),
             trace_id: self.trace_id.clone(),
@@ -274,6 +292,7 @@ impl TurnContext {
             turn_metadata_state: self.turn_metadata_state.clone(),
             turn_skills: self.turn_skills.clone(),
             turn_timing_state: Arc::clone(&self.turn_timing_state),
+            turn_span,
             server_model_warning_emitted: AtomicBool::new(
                 self.server_model_warning_emitted.load(Ordering::Relaxed),
             ),
@@ -566,6 +585,7 @@ impl Session {
             turn_metadata_state,
             turn_skills: TurnSkillsContext::new(skills_outcome),
             turn_timing_state: Arc::new(TurnTimingState::default()),
+            turn_span: OnceLock::new(),
             server_model_warning_emitted: AtomicBool::new(false),
             model_verification_emitted: AtomicBool::new(false),
         }

@@ -1,3 +1,6 @@
+use anyhow::Result;
+use codex_config::types::McpServerConfig;
+use codex_config::types::McpServerTransportConfig;
 use codex_core::config::Constrained;
 use codex_features::Feature;
 use codex_protocol::models::PermissionProfile;
@@ -11,6 +14,7 @@ use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_custom_tool_call;
 use core_test_support::responses::ev_function_call;
+use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_local_shell_call;
 use core_test_support::responses::ev_message_item_added;
 use core_test_support::responses::ev_output_text_delta;
@@ -24,10 +28,14 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::sse_response;
 use core_test_support::responses::start_mock_server;
+use core_test_support::skip_if_no_network;
+use core_test_support::stdio_server_bin;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
+use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Duration;
 use tracing::Level;
 use tracing_test::traced_test;
 
@@ -565,7 +573,7 @@ async fn process_sse_emits_completed_telemetry() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn turn_and_completed_response_spans_record_token_usage() {
+async fn turn_span_records_token_usage_and_image_metadata() {
     let buffer: &'static Mutex<Vec<u8>> = Box::leak(Box::new(Mutex::new(Vec::new())));
     let subscriber = tracing_subscriber::fmt()
         .with_level(true)
@@ -603,6 +611,10 @@ async fn turn_and_completed_response_spans_record_token_usage() {
                 .features
                 .disable(Feature::GhostCommit)
                 .expect("test config should allow feature update");
+            config
+                .features
+                .disable(Feature::ShellSnapshot)
+                .expect("test config should allow feature update");
         })
         .build(&server)
         .await
@@ -613,10 +625,15 @@ async fn turn_and_completed_response_spans_record_token_usage() {
     codex
         .submit(Op::UserInput {
             environments: None,
-            items: vec![UserInput::Text {
-                text: "hello".into(),
-                text_elements: Vec::new(),
-            }],
+            items: vec![
+                UserInput::Text {
+                    text: "hello".into(),
+                    text_elements: Vec::new(),
+                },
+                UserInput::Image {
+                    image_url: "DATA:image/jpeg;BASE64,AAAA".to_string(),
+                },
+            ],
             final_output_json_schema: None,
             responsesapi_client_metadata: None,
         })
@@ -650,9 +667,148 @@ async fn turn_and_completed_response_spans_record_token_usage() {
                 && line.contains("codex.turn.token_usage.output_tokens=5")
                 && line.contains("codex.turn.token_usage.reasoning_output_tokens=2")
                 && line.contains("codex.turn.token_usage.total_tokens=9")
+                && line.contains("codex.turn.model_input_image_count=1")
+                && line.contains("codex.turn.model_input_user_image_count=1")
+                && line.contains("codex.turn.model_input_tool_image_count=0")
+                && line.contains("codex.turn.model_input_image_types=\"jpeg\"")
+                && line.contains("codex.turn.model_input_image_mime_types=\"image/jpeg\"")
+                && line.contains("\\\"source\\\":\\\"message\\\"")
+                && line.contains("\\\"byte_length\\\":3")
         }),
-        "missing regular turn span token usage\nlogs:\n{logs}"
+        "missing regular turn span token usage and image metadata\nlogs:\n{logs}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn turn_span_records_tool_output_image_metadata() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let buffer: &'static Mutex<Vec<u8>> = Box::leak(Box::new(Mutex::new(Vec::new())));
+    let subscriber = tracing_subscriber::fmt()
+        .with_level(true)
+        .with_ansi(false)
+        .with_max_level(Level::TRACE)
+        .with_span_events(FmtSpan::FULL)
+        .with_writer(MockWriter::new(buffer))
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let server = start_mock_server().await;
+
+    let call_id = "rmcp-image-otel";
+    let server_name = "rmcp";
+    let namespace = format!("mcp__{server_name}__");
+    let openai_png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ee9bQAAAABJRU5ErkJggg==";
+
+    mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_function_call_with_namespace(call_id, &namespace, "image", "{}"),
+            ev_completed("resp-1"),
+        ]),
+    )
+    .await;
+    mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-2"),
+        ]),
+    )
+    .await;
+
+    let rmcp_test_server_bin = stdio_server_bin()?;
+    let fixture = test_codex()
+        .with_config(move |config| {
+            config
+                .features
+                .disable(Feature::GhostCommit)
+                .expect("test config should allow feature update");
+            config
+                .features
+                .disable(Feature::ShellSnapshot)
+                .expect("test config should allow feature update");
+            let mut servers = config.mcp_servers.get().clone();
+            servers.insert(
+                server_name.to_string(),
+                McpServerConfig {
+                    transport: McpServerTransportConfig::Stdio {
+                        command: rmcp_test_server_bin,
+                        args: Vec::new(),
+                        env: Some(HashMap::from([(
+                            "MCP_TEST_IMAGE_DATA_URL".to_string(),
+                            openai_png.to_string(),
+                        )])),
+                        env_vars: Vec::new(),
+                        cwd: None,
+                    },
+                    experimental_environment: None,
+                    enabled: true,
+                    required: false,
+                    supports_parallel_tool_calls: false,
+                    disabled_reason: None,
+                    startup_timeout_sec: Some(Duration::from_secs(10)),
+                    tool_timeout_sec: None,
+                    default_tools_approval_mode: None,
+                    enabled_tools: None,
+                    disabled_tools: None,
+                    scopes: None,
+                    oauth_resource: None,
+                    tools: HashMap::new(),
+                },
+            );
+            config
+                .mcp_servers
+                .set(servers)
+                .expect("test mcp servers should accept any configuration");
+        })
+        .build(&server)
+        .await?;
+    let session_model = fixture.session_configured.model.clone();
+    let permission_profile = PermissionProfile::read_only();
+    let sandbox_policy = permission_profile.to_legacy_sandbox_policy(fixture.cwd.path())?;
+
+    fixture
+        .codex
+        .submit(Op::UserTurn {
+            environments: None,
+            items: vec![UserInput::Text {
+                text: "call the rmcp image tool".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            cwd: fixture.cwd.path().to_path_buf(),
+            approval_policy: AskForApproval::Never,
+            approvals_reviewer: None,
+            sandbox_policy,
+            permission_profile: Some(permission_profile),
+            model: session_model,
+            effort: None,
+            summary: None,
+            service_tier: None,
+            collaboration_mode: None,
+            personality: None,
+        })
+        .await?;
+
+    wait_for_event(&fixture.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+
+    let logs = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+    assert!(
+        logs.lines().any(|line| {
+            line.contains("turn{otel.name=\"session_task.turn\"")
+                && line.contains("codex.turn.model_input_image_count=1")
+                && line.contains("codex.turn.model_input_user_image_count=0")
+                && line.contains("codex.turn.model_input_tool_image_count=1")
+                && line.contains("codex.turn.model_input_image_types=\"png\"")
+                && line.contains("codex.turn.model_input_image_mime_types=\"image/png\"")
+                && line.contains("\\\"source\\\":\\\"tool_output\\\"")
+        }),
+        "missing tool output image metadata on turn span\nlogs:\n{logs}"
+    );
+
+    Ok(())
 }
 
 #[tokio::test]
