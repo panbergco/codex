@@ -31,6 +31,7 @@ use crate::workspace_acl::protect_workspace_agents_dir;
 use crate::workspace_acl::protect_workspace_codex_dir;
 use anyhow::Result;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ffi::c_void;
 use std::path::Path;
 use std::path::PathBuf;
@@ -229,10 +230,12 @@ pub(crate) fn apply_legacy_session_acl_rules(
     psid_workspace: Option<&LocalSid>,
     persist_aces: bool,
     additional_deny_paths: &[PathBuf],
+    excluded_deny_paths: &[PathBuf],
 ) -> Vec<PathBuf> {
     let AllowDenyPaths { allow, mut deny } =
         compute_allow_paths(policy, sandbox_policy_cwd, current_dir, env_map);
     deny.extend(additional_deny_paths.iter().cloned());
+    remove_matching_paths(&mut deny, excluded_deny_paths);
     let mut guards: Vec<PathBuf> = Vec::new();
     let read_roots = legacy_session_executable_read_roots(env_map, command);
     let direct_read_paths = legacy_session_direct_read_paths(env_map);
@@ -289,12 +292,37 @@ pub(crate) fn apply_legacy_session_acl_rules(
             allow_null_device(psid_workspace.as_ptr());
             allow_named_pipe_device(psid_workspace.as_ptr());
             if persist_aces && matches!(policy, SandboxPolicy::WorkspaceWrite { .. }) {
-                let _ = protect_workspace_codex_dir(current_dir, psid_workspace.as_ptr());
-                let _ = protect_workspace_agents_dir(current_dir, psid_workspace.as_ptr());
+                if !path_matches_any(&current_dir.join(".codex"), excluded_deny_paths) {
+                    let _ = protect_workspace_codex_dir(current_dir, psid_workspace.as_ptr());
+                }
+                if !path_matches_any(&current_dir.join(".agents"), excluded_deny_paths) {
+                    let _ = protect_workspace_agents_dir(current_dir, psid_workspace.as_ptr());
+                }
             }
         }
     }
     guards
+}
+
+fn remove_matching_paths(paths: &mut HashSet<PathBuf>, excluded: &[PathBuf]) {
+    if excluded.is_empty() {
+        return;
+    }
+    let excluded_paths: Vec<PathBuf> = excluded
+        .iter()
+        .map(|path| canonicalize_path(path))
+        .collect();
+    paths.retain(|path| {
+        let path = canonicalize_path(path);
+        !excluded_paths.iter().any(|excluded| excluded == &path)
+    });
+}
+
+fn path_matches_any(path: &Path, paths: &[PathBuf]) -> bool {
+    let path = canonicalize_path(path);
+    paths
+        .iter()
+        .any(|candidate| canonicalize_path(candidate) == path)
 }
 
 pub(crate) fn legacy_session_executable_read_roots(
@@ -420,6 +448,7 @@ pub(crate) fn prepare_elevated_spawn_context(
     env_map: &mut HashMap<String, String>,
     command: &[String],
     protected_metadata_targets: &[ProtectedMetadataTarget],
+    excluded_deny_paths: &[PathBuf],
 ) -> Result<ElevatedSpawnContext> {
     let common = prepare_spawn_context_common(
         policy_json_or_preset,
@@ -431,12 +460,13 @@ pub(crate) fn prepare_elevated_spawn_context(
         /*add_git_safe_directory*/ true,
     )?;
 
-    let AllowDenyPaths { allow, deny } = compute_allow_paths(
+    let AllowDenyPaths { allow, mut deny } = compute_allow_paths(
         &common.policy,
         sandbox_policy_cwd,
         &common.current_dir,
         env_map,
     );
+    remove_matching_paths(&mut deny, excluded_deny_paths);
     let write_roots: Vec<PathBuf> = allow.into_iter().collect();
     let deny_write_paths: Vec<PathBuf> = deny.into_iter().collect();
     let write_roots_override = if common.is_workspace_write {

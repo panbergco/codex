@@ -455,6 +455,22 @@ pub unsafe fn add_allow_ace(path: &Path, psid: *mut c_void) -> Result<bool> {
 /// # Safety
 /// Caller must ensure `psid` points to a valid SID and `path` refers to an existing file or directory.
 pub unsafe fn add_deny_write_ace(path: &Path, psid: *mut c_void) -> Result<bool> {
+    add_deny_write_ace_with_inheritance(path, psid, CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE)
+}
+
+/// Adds a deny ACE to the target object without making the ACE inheritable by children.
+///
+/// # Safety
+/// Caller must ensure `psid` points to a valid SID and `path` refers to an existing file or directory.
+pub unsafe fn add_deny_write_ace_non_inheriting(path: &Path, psid: *mut c_void) -> Result<bool> {
+    add_deny_write_ace_with_inheritance(path, psid, 0)
+}
+
+unsafe fn add_deny_write_ace_with_inheritance(
+    path: &Path,
+    psid: *mut c_void,
+    inheritance: u32,
+) -> Result<bool> {
     let mut p_sd: *mut c_void = std::ptr::null_mut();
     let mut p_dacl: *mut ACL = std::ptr::null_mut();
     let code = GetNamedSecurityInfoW(
@@ -489,7 +505,7 @@ pub unsafe fn add_deny_write_ace(path: &Path, psid: *mut c_void) -> Result<bool>
             | DELETE
             | FILE_DELETE_CHILD;
         explicit.grfAccessMode = DENY_ACCESS;
-        explicit.grfInheritance = CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE;
+        explicit.grfInheritance = inheritance;
         explicit.Trustee = trustee;
         let mut p_new_dacl: *mut ACL = std::ptr::null_mut();
         let code2 = SetEntriesInAclW(1, &explicit, p_dacl, &mut p_new_dacl);

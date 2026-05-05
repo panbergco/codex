@@ -198,9 +198,13 @@ fn run_setup_refresh_inner(
         return Ok(());
     }
     let (read_roots, write_roots) = build_payload_roots(&request, &overrides);
-    let deny_write_paths = build_payload_deny_write_paths(&request, overrides.deny_write_paths);
     let protected_metadata_targets =
         build_payload_protected_metadata_targets(overrides.protected_metadata_targets);
+    let deny_write_paths = build_payload_deny_write_paths(
+        &request,
+        overrides.deny_write_paths,
+        &protected_metadata_targets,
+    );
     let network_identity =
         SandboxNetworkIdentity::from_policy(request.policy, request.proxy_enforced);
     let offline_proxy_settings = offline_proxy_settings_from_env(request.env_map, network_identity);
@@ -757,9 +761,13 @@ pub fn run_elevated_setup(
         )
     })?;
     let (read_roots, write_roots) = build_payload_roots(&request, &overrides);
-    let deny_write_paths = build_payload_deny_write_paths(&request, overrides.deny_write_paths);
     let protected_metadata_targets =
         build_payload_protected_metadata_targets(overrides.protected_metadata_targets);
+    let deny_write_paths = build_payload_deny_write_paths(
+        &request,
+        overrides.deny_write_paths,
+        &protected_metadata_targets,
+    );
     let network_identity =
         SandboxNetworkIdentity::from_policy(request.policy, request.proxy_enforced);
     let offline_proxy_settings = offline_proxy_settings_from_env(request.env_map, network_identity);
@@ -835,6 +843,7 @@ fn build_payload_roots(
 fn build_payload_deny_write_paths(
     request: &SandboxSetupRequest<'_>,
     explicit_deny_write_paths: Option<Vec<PathBuf>>,
+    protected_metadata_targets: &[ProtectedMetadataTarget],
 ) -> Vec<PathBuf> {
     let allow_deny_paths: AllowDenyPaths = compute_allow_paths(
         request.policy,
@@ -842,6 +851,13 @@ fn build_payload_deny_write_paths(
         request.command_cwd,
         request.env_map,
     );
+    // Sentinel targets are protected by the dedicated metadata payload so setup
+    // applies a direct deny ACE without inheriting that deny into descendants.
+    let sentinel_path_keys: HashSet<String> = protected_metadata_targets
+        .iter()
+        .filter(|target| target.mode == ProtectedMetadataMode::MissingDenySentinel)
+        .map(|target| canonical_path_key(&target.path))
+        .collect();
     let mut deny_write_paths: Vec<PathBuf> = explicit_deny_write_paths
         .unwrap_or_default()
         .into_iter()
@@ -854,6 +870,7 @@ fn build_payload_deny_write_paths(
         })
         .collect();
     deny_write_paths.extend(allow_deny_paths.deny);
+    deny_write_paths.retain(|path| !sentinel_path_keys.contains(&canonical_path_key(path)));
     deny_write_paths
 }
 
@@ -1472,7 +1489,7 @@ mod tests {
         };
 
         let deny_write_paths =
-            super::build_payload_deny_write_paths(&request, Some(vec![explicit_deny.clone()]));
+            super::build_payload_deny_write_paths(&request, Some(vec![explicit_deny.clone()]), &[]);
 
         assert_eq!(
             [
@@ -1484,6 +1501,41 @@ mod tests {
             .collect::<HashSet<PathBuf>>(),
             deny_write_paths.into_iter().collect()
         );
+    }
+
+    #[test]
+    fn payload_deny_write_paths_skip_missing_metadata_sentinels() {
+        let tmp = TempDir::new().expect("tempdir");
+        let codex_home = tmp.path().join("codex-home");
+        let command_cwd = tmp.path().join("workspace");
+        let command_git = command_cwd.join(".git");
+        let explicit_deny = tmp.path().join("explicit-deny");
+        fs::create_dir_all(&command_git).expect("create command .git sentinel");
+        let policy = SandboxPolicy::WorkspaceWrite {
+            writable_roots: vec![],
+            network_access: false,
+            exclude_tmpdir_env_var: true,
+            exclude_slash_tmp: true,
+        };
+        let request = super::SandboxSetupRequest {
+            policy: &policy,
+            policy_cwd: &command_cwd,
+            command_cwd: &command_cwd,
+            env_map: &HashMap::new(),
+            codex_home: &codex_home,
+            proxy_enforced: false,
+        };
+
+        let deny_write_paths = super::build_payload_deny_write_paths(
+            &request,
+            Some(vec![explicit_deny.clone()]),
+            &[super::ProtectedMetadataTarget {
+                path: command_git.clone(),
+                mode: super::ProtectedMetadataMode::MissingDenySentinel,
+            }],
+        );
+
+        assert_eq!(vec![explicit_deny], deny_write_paths);
     }
 
     #[test]

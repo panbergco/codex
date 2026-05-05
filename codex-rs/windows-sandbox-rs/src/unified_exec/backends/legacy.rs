@@ -1,5 +1,6 @@
 use super::windows_common::finish_driver_spawn;
 use super::windows_common::normalize_windows_tty_input;
+use crate::acl::add_deny_write_ace_non_inheriting;
 use crate::acl::revoke_ace;
 use crate::conpty::ConptyInstance;
 use crate::conpty::spawn_conpty_process_as_user;
@@ -18,6 +19,7 @@ use crate::spawn_prep::allow_null_device_for_workspace_write;
 use crate::spawn_prep::apply_legacy_session_acl_rules;
 use crate::spawn_prep::prepare_legacy_session_security;
 use crate::spawn_prep::prepare_legacy_spawn_context;
+use anyhow::Context;
 use anyhow::Result;
 use codex_utils_pty::ProcessDriver;
 use codex_utils_pty::SpawnedProcess;
@@ -332,7 +334,8 @@ pub(crate) async fn spawn_windows_sandbox_session_legacy(
         prepare_protected_metadata_targets(protected_metadata_targets)?;
     let additional_deny_write_paths: Vec<PathBuf> =
         protected_metadata_guard.deny_paths().cloned().collect();
-    protected_metadata_guard.arm_sentinel_cleanup()?;
+    let sentinel_deny_exclusions: Vec<PathBuf> =
+        protected_metadata_guard.sentinel_paths().cloned().collect();
     let guards = apply_legacy_session_acl_rules(
         &common.policy,
         sandbox_policy_cwd,
@@ -343,7 +346,21 @@ pub(crate) async fn spawn_windows_sandbox_session_legacy(
         security.psid_workspace.as_ref(),
         persist_aces,
         &additional_deny_write_paths,
+        &sentinel_deny_exclusions,
     );
+    unsafe {
+        for path in &sentinel_deny_exclusions {
+            add_deny_write_ace_non_inheriting(path, security.psid_generic.as_ptr()).with_context(
+                || {
+                    format!(
+                        "failed to apply protected metadata sentinel ACL to {}",
+                        path.display()
+                    )
+                },
+            )?;
+        }
+    }
+    protected_metadata_guard.arm_sentinel_cleanup()?;
     let protected_metadata_runtime = protected_metadata_guard.into_runtime()?;
 
     let (writer_tx, writer_rx) = mpsc::channel::<Vec<u8>>(128);

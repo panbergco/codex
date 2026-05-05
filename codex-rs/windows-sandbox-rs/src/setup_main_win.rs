@@ -15,6 +15,7 @@ use codex_windows_sandbox::SetupErrorCode;
 use codex_windows_sandbox::SetupErrorReport;
 use codex_windows_sandbox::SetupFailure;
 use codex_windows_sandbox::add_deny_write_ace;
+use codex_windows_sandbox::add_deny_write_ace_non_inheriting;
 use codex_windows_sandbox::canonicalize_path;
 use codex_windows_sandbox::convert_string_sid_to_sid;
 use codex_windows_sandbox::ensure_allow_mask_aces_with_inheritance;
@@ -832,7 +833,53 @@ fn run_setup_full(payload: &Payload, log: &mut File, sbx_dir: &Path) -> Result<(
             ProtectedMetadataMode::MissingCreationMonitor => continue,
             ProtectedMetadataMode::MissingDenySentinel => {
                 ensure_missing_deny_sentinel(&target.path)?;
-                protected_metadata_existing_deny_paths(&target.path)
+                if !seen_deny_paths.insert(target.path.clone()) {
+                    continue;
+                }
+                if std::fs::symlink_metadata(&target.path).is_err() {
+                    log_line(
+                        log,
+                        &format!(
+                            "protected metadata sentinel {} missing during setup; skipping",
+                            target.path.display()
+                        ),
+                    )?;
+                    continue;
+                }
+
+                let canonical_path = canonicalize_path(&target.path);
+                let deny_psid = if canonical_path.starts_with(&canonical_command_cwd) {
+                    workspace_psid
+                } else {
+                    cap_psid
+                };
+
+                match unsafe { add_deny_write_ace_non_inheriting(&target.path, deny_psid) } {
+                    Ok(true) => {
+                        log_line(
+                            log,
+                            &format!(
+                                "applied deny ACE to protect metadata sentinel {}",
+                                target.path.display()
+                            ),
+                        )?;
+                    }
+                    Ok(false) => {}
+                    Err(err) => {
+                        refresh_errors.push(format!(
+                            "metadata sentinel deny ACE failed on {}: {err}",
+                            target.path.display()
+                        ));
+                        log_line(
+                            log,
+                            &format!(
+                                "metadata sentinel deny ACE failed on {}: {err}",
+                                target.path.display()
+                            ),
+                        )?;
+                    }
+                }
+                continue;
             }
         };
         if deny_paths.is_empty() {
