@@ -478,7 +478,7 @@ fn windows_debug_protected_metadata_targets(
             let mode = if std::fs::symlink_metadata(path.as_path()).is_ok() {
                 codex_windows_sandbox::ProtectedMetadataMode::ExistingDeny
             } else {
-                codex_windows_sandbox::ProtectedMetadataMode::MissingDenySentinel
+                codex_windows_sandbox::ProtectedMetadataMode::MissingCreationMonitor
             };
             targets.push(codex_windows_sandbox::ProtectedMetadataTarget {
                 path: path.as_path().to_path_buf(),
@@ -792,6 +792,46 @@ mod tests {
         );
         std::fs::write(codex_home.path().join("config.toml"), config)?;
         Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_debug_sandbox_uses_creation_monitor_for_missing_metadata() {
+        let temp_dir = TempDir::new().expect("tempdir");
+        let policy = codex_protocol::permissions::FileSystemSandboxPolicy::restricted(vec![
+            codex_protocol::permissions::FileSystemSandboxEntry {
+                path: codex_protocol::permissions::FileSystemPath::Special {
+                    value: codex_protocol::permissions::FileSystemSpecialPath::Root,
+                },
+                access: codex_protocol::permissions::FileSystemAccessMode::Read,
+            },
+            codex_protocol::permissions::FileSystemSandboxEntry {
+                path: codex_protocol::permissions::FileSystemPath::Special {
+                    value: codex_protocol::permissions::FileSystemSpecialPath::project_roots(None),
+                },
+                access: codex_protocol::permissions::FileSystemAccessMode::Write,
+            },
+        ]);
+
+        let targets = windows_debug_protected_metadata_targets(&policy, temp_dir.path());
+
+        assert_eq!(
+            targets,
+            vec![
+                codex_windows_sandbox::ProtectedMetadataTarget {
+                    path: temp_dir.path().join(".agents"),
+                    mode: codex_windows_sandbox::ProtectedMetadataMode::MissingCreationMonitor,
+                },
+                codex_windows_sandbox::ProtectedMetadataTarget {
+                    path: temp_dir.path().join(".codex"),
+                    mode: codex_windows_sandbox::ProtectedMetadataMode::MissingCreationMonitor,
+                },
+                codex_windows_sandbox::ProtectedMetadataTarget {
+                    path: temp_dir.path().join(".git"),
+                    mode: codex_windows_sandbox::ProtectedMetadataMode::MissingCreationMonitor,
+                },
+            ]
+        );
     }
 
     #[tokio::test]
