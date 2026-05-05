@@ -8,6 +8,7 @@ use super::*;
 use base64::Engine;
 use codex_app_server_protocol::FsUploadFileParams;
 use codex_app_server_protocol::FsUploadFileResponse;
+use codex_app_server_protocol::MAX_UPLOAD_FILE_BYTES;
 use codex_app_server_protocol::MarketplaceAddParams;
 use codex_app_server_protocol::MarketplaceAddResponse;
 use codex_app_server_protocol::MarketplaceRemoveParams;
@@ -568,6 +569,8 @@ pub(super) async fn upload_local_file_request(
         .and_then(|name| name.to_str())
         .ok_or_else(|| color_eyre::eyre::eyre!("Upload path must name a file."))?
         .to_string();
+    let metadata = tokio::fs::metadata(local_path).await?;
+    ensure_upload_file_size(metadata.len())?;
     let bytes = tokio::fs::read(local_path).await?;
     let request_id = RequestId::String(format!("upload-local-file-{}", Uuid::new_v4()));
     let response: FsUploadFileResponse = request_handle
@@ -581,6 +584,13 @@ pub(super) async fn upload_local_file_request(
         .await
         .wrap_err("fs/uploadFile failed in TUI")?;
     Ok(response.path.into())
+}
+
+fn ensure_upload_file_size(file_size: u64) -> Result<()> {
+    if file_size > MAX_UPLOAD_FILE_BYTES {
+        color_eyre::eyre::bail!("Uploads accept files up to {MAX_UPLOAD_FILE_BYTES} bytes.");
+    }
+    Ok(())
 }
 
 pub(super) async fn fetch_account_rate_limits(
@@ -986,6 +996,17 @@ mod tests {
                 interface: None,
                 plugins: Vec::new(),
             }]
+        );
+    }
+
+    #[test]
+    fn upload_rejects_files_larger_than_the_protocol_limit() {
+        let err = ensure_upload_file_size(MAX_UPLOAD_FILE_BYTES + 1)
+            .expect_err("file should exceed upload limit");
+
+        assert_eq!(
+            err.to_string(),
+            format!("Uploads accept files up to {MAX_UPLOAD_FILE_BYTES} bytes.")
         );
     }
 
