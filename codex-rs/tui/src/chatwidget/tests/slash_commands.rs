@@ -1947,7 +1947,7 @@ async fn queued_upload_stops_before_follow_up_prompt() {
     assert!(
         events.iter().any(|event| matches!(
             event,
-            AppEvent::UploadLocalFile { path } if path == &PathBuf::from("/tmp/demo.txt")
+            AppEvent::UploadLocalFile { path } if path == &test_path_buf("/tmp/demo.txt")
         )),
         "expected queued /upload to start upload; events: {events:?}"
     );
