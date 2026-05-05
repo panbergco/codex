@@ -696,7 +696,7 @@ async fn track_turn_resolved_config_analytics(
             reasoning_summary: Some(turn_context.reasoning_summary),
             service_tier: turn_context
                 .config
-                .service_tier
+                .service_tier_id
                 .as_deref()
                 .and_then(ServiceTier::from_request_value),
             approval_policy: turn_context.approval_policy.value(),
@@ -1863,7 +1863,7 @@ async fn try_run_sampling_request(
             &turn_context.session_telemetry,
             turn_context.reasoning_effort,
             turn_context.reasoning_summary,
-            turn_context.config.service_tier.clone(),
+            turn_context.config.service_tier_id.clone(),
             turn_metadata_header,
             &inference_trace,
         )

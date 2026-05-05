@@ -3685,6 +3685,12 @@
             "null"
           ]
         },
+        "service_tier_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "tools": {
           "anyOf": [
             {
@@ -9696,6 +9702,12 @@
           ]
         },
         "service_tier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service_tier_id": {
           "type": [
             "string",
             "null"
