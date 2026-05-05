@@ -3220,9 +3220,9 @@ pub struct FsWriteFileParams {
 #[ts(export_to = "v2/")]
 pub struct FsWriteFileResponse {}
 
-/// Upload a local client file into Codex-managed host storage.
 pub const MAX_UPLOAD_FILE_BYTES: u64 = 50 * 1024 * 1024;
 
+/// Upload a local client file into Codex-managed host storage.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
