@@ -454,6 +454,7 @@ pub(crate) struct CodexToolItemEventBase {
     pub(crate) started_at_ms: u64,
     pub(crate) completed_at_ms: u64,
     pub(crate) duration_ms: Option<u64>,
+    pub(crate) execution_duration_ms: Option<u64>,
     pub(crate) review_count: u64,
     pub(crate) guardian_review_count: u64,
     pub(crate) user_review_count: u64,
