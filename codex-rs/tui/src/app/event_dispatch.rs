@@ -657,6 +657,7 @@ impl App {
             AppEvent::LocalFileUploaded { local_path, result } => match result {
                 Ok(remote_path) => {
                     self.chat_widget.insert_uploaded_file_path(&remote_path);
+                    self.chat_widget.maybe_send_next_queued_input();
                 }
                 Err(err) => {
                     self.chat_widget.add_error_message(format!(

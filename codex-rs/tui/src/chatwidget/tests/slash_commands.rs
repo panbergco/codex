@@ -1960,6 +1960,33 @@ async fn queued_upload_stops_before_follow_up_prompt() {
 }
 
 #[tokio::test]
+async fn queued_upload_resumes_follow_up_prompt_after_upload_succeeds() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    handle_turn_started(&mut chat, "turn-1");
+
+    queue_composer_text_with_tab(&mut chat, "/upload /tmp/demo.txt");
+    queue_composer_text_with_tab(&mut chat, "use the upload");
+
+    complete_turn_with_message(&mut chat, "turn-1", Some("done"));
+    let _events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+
+    chat.insert_uploaded_file_path(Path::new("/tmp/.codex/uploads/demo.txt"));
+    chat.maybe_send_next_queued_input();
+
+    match next_submit_op(&mut op_rx) {
+        Op::UserTurn { items, .. } => assert_eq!(
+            items,
+            vec![UserInput::Text {
+                text: "use the upload".to_string(),
+                text_elements: Vec::new(),
+            }]
+        ),
+        other => panic!("expected queued follow-up prompt to submit, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn user_turn_sends_standard_override_after_fast_is_turned_off() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5.3-codex")).await;
     chat.thread_id = Some(ThreadId::new());
