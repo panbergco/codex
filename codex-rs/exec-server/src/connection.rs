@@ -84,11 +84,15 @@ pub(crate) struct JsonRpcConnection {
 
 impl Drop for JsonRpcConnection {
     fn drop(&mut self) {
-        self.transport.shutdown();
+        self.shutdown();
     }
 }
 
 impl JsonRpcConnection {
+    pub(crate) fn shutdown(&mut self) {
+        self.transport.shutdown();
+    }
+
     pub(crate) fn from_stdio<R, W>(reader: R, writer: W, connection_label: String) -> Self
     where
         R: AsyncRead + Unpin + Send + 'static,
@@ -293,7 +297,7 @@ impl JsonRpcConnection {
         }
     }
 
-    pub(crate) fn take_client_runtime(
+    pub(crate) fn take_runtime(
         &mut self,
     ) -> (
         mpsc::Sender<JSONRPCMessage>,
@@ -304,7 +308,7 @@ impl JsonRpcConnection {
             outgoing_tx,
             incoming_rx,
             task_handles,
-        } = self.take_runtime("JSON-RPC client runtime already taken");
+        } = self.take_runtime_or_panic("JSON-RPC connection runtime already taken");
         (outgoing_tx, incoming_rx, task_handles)
     }
 
@@ -313,22 +317,7 @@ impl JsonRpcConnection {
         self
     }
 
-    pub(crate) fn into_parts(
-        mut self,
-    ) -> (
-        mpsc::Sender<JSONRPCMessage>,
-        mpsc::Receiver<JsonRpcConnectionEvent>,
-        Vec<tokio::task::JoinHandle<()>>,
-    ) {
-        let JsonRpcConnectionRuntime {
-            outgoing_tx,
-            incoming_rx,
-            task_handles,
-        } = self.take_runtime("JSON-RPC connection parts already taken");
-        (outgoing_tx, incoming_rx, task_handles)
-    }
-
-    fn take_runtime(&mut self, message: &'static str) -> JsonRpcConnectionRuntime {
+    fn take_runtime_or_panic(&mut self, message: &'static str) -> JsonRpcConnectionRuntime {
         match self.runtime.take() {
             Some(runtime) => runtime,
             None => panic!("{message}"),

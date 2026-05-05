@@ -152,9 +152,8 @@ pub(crate) struct Session {
 }
 
 struct Inner {
-    // Keep the underlying transport connection alive and drop it before the RPC
-    // client starts tearing down its channel/task handles.
-    connection: Option<JsonRpcConnection>,
+    // Keep the underlying transport connection alive for the client lifetime.
+    connection: JsonRpcConnection,
     client: RpcClient,
     // The remote transport delivers one shared notification stream for every
     // process on the connection. Keep a local process_id -> session registry so
@@ -184,7 +183,7 @@ struct Inner {
 impl Drop for Inner {
     fn drop(&mut self) {
         self.reader_task.abort();
-        drop(self.connection.take());
+        self.connection.shutdown();
     }
 }
 
@@ -466,7 +465,7 @@ impl ExecServerClient {
             });
 
             Inner {
-                connection: Some(connection),
+                connection,
                 client: rpc_client,
                 sessions: ArcSwap::from_pointee(HashMap::new()),
                 sessions_write_lock: Mutex::new(()),

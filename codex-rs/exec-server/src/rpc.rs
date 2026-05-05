@@ -58,11 +58,9 @@ pub(crate) enum RpcServerOutboundMessage {
         request_id: RequestId,
         error: JSONRPCErrorError,
     },
-    #[allow(dead_code)]
     Notification(JSONRPCNotification),
 }
 
-#[allow(dead_code)]
 #[derive(Clone)]
 pub(crate) struct RpcNotificationSender {
     outgoing_tx: mpsc::Sender<RpcServerOutboundMessage>,
@@ -84,7 +82,6 @@ impl RpcNotificationSender {
             .map_err(|_| internal_error("RPC connection closed while sending response".into()))
     }
 
-    #[allow(dead_code)]
     pub(crate) async fn notify<P: Serialize>(
         &self,
         method: &str,
@@ -235,7 +232,7 @@ impl RpcClient {
     pub(crate) fn new(
         connection: &mut JsonRpcConnection,
     ) -> (Self, mpsc::Receiver<RpcClientEvent>) {
-        let (write_tx, mut incoming_rx, transport_tasks) = connection.take_client_runtime();
+        let (write_tx, mut incoming_rx, transport_tasks) = connection.take_runtime();
         let pending = Arc::new(Mutex::new(HashMap::<RequestId, PendingRequest>::new()));
         let (event_tx, event_rx) = mpsc::channel(128);
         let closed = Arc::new(AtomicBool::new(false));
@@ -363,7 +360,6 @@ impl RpcClient {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
     pub(crate) async fn pending_request_count(&self) -> usize {
         self.pending.lock().await.len()
     }

@@ -42,12 +42,12 @@ impl ConnectionProcessor {
 }
 
 async fn run_connection(
-    connection: JsonRpcConnection,
+    mut connection: JsonRpcConnection,
     session_registry: Arc<SessionRegistry>,
     runtime_paths: ExecServerRuntimePaths,
 ) {
     let router = Arc::new(build_router());
-    let (json_outgoing_tx, mut incoming_rx, connection_tasks) = connection.into_parts();
+    let (json_outgoing_tx, mut incoming_rx, connection_tasks) = connection.take_runtime();
     let (outgoing_tx, mut outgoing_rx) =
         mpsc::channel::<RpcServerOutboundMessage>(CHANNEL_CAPACITY);
     let notifications = RpcNotificationSender::new(outgoing_tx.clone());
