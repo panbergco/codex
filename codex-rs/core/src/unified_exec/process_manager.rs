@@ -190,8 +190,8 @@ fn protected_metadata_targets_for_windows_session(
                         WindowsProtectedMetadataMode::ExistingDeny => {
                             codex_windows_sandbox::ProtectedMetadataMode::ExistingDeny
                         }
-                        WindowsProtectedMetadataMode::MissingDenySentinel => {
-                            codex_windows_sandbox::ProtectedMetadataMode::MissingDenySentinel
+                        WindowsProtectedMetadataMode::MissingCreationMonitor => {
+                            codex_windows_sandbox::ProtectedMetadataMode::MissingCreationMonitor
                         }
                     };
                     codex_windows_sandbox::ProtectedMetadataTarget {

@@ -851,11 +851,17 @@ fn build_payload_deny_write_paths(
         request.command_cwd,
         request.env_map,
     );
-    // Sentinel targets are protected by the dedicated metadata payload so setup
-    // applies a direct deny ACE without inheriting that deny into descendants.
-    let sentinel_path_keys: HashSet<String> = protected_metadata_targets
+    // Missing metadata targets are protected by the dedicated metadata payload.
+    // Do not let generic deny-write setup materialize them as directories.
+    let missing_metadata_path_keys: HashSet<String> = protected_metadata_targets
         .iter()
-        .filter(|target| target.mode == ProtectedMetadataMode::MissingDenySentinel)
+        .filter(|target| {
+            matches!(
+                target.mode,
+                ProtectedMetadataMode::MissingCreationMonitor
+                    | ProtectedMetadataMode::MissingDenySentinel
+            )
+        })
         .map(|target| canonical_path_key(&target.path))
         .collect();
     let mut deny_write_paths: Vec<PathBuf> = explicit_deny_write_paths
@@ -870,7 +876,7 @@ fn build_payload_deny_write_paths(
         })
         .collect();
     deny_write_paths.extend(allow_deny_paths.deny);
-    deny_write_paths.retain(|path| !sentinel_path_keys.contains(&canonical_path_key(path)));
+    deny_write_paths.retain(|path| !missing_metadata_path_keys.contains(&canonical_path_key(path)));
     deny_write_paths
 }
 
@@ -1504,13 +1510,14 @@ mod tests {
     }
 
     #[test]
-    fn payload_deny_write_paths_skip_missing_metadata_sentinels() {
+    fn payload_deny_write_paths_skip_missing_metadata_targets() {
         let tmp = TempDir::new().expect("tempdir");
         let codex_home = tmp.path().join("codex-home");
         let command_cwd = tmp.path().join("workspace");
         let command_git = command_cwd.join(".git");
+        let command_codex = command_cwd.join(".codex");
         let explicit_deny = tmp.path().join("explicit-deny");
-        fs::create_dir_all(&command_git).expect("create command .git sentinel");
+        fs::create_dir_all(&command_cwd).expect("create workspace");
         let policy = SandboxPolicy::WorkspaceWrite {
             writable_roots: vec![],
             network_access: false,
@@ -1529,10 +1536,16 @@ mod tests {
         let deny_write_paths = super::build_payload_deny_write_paths(
             &request,
             Some(vec![explicit_deny.clone()]),
-            &[super::ProtectedMetadataTarget {
-                path: command_git.clone(),
-                mode: super::ProtectedMetadataMode::MissingDenySentinel,
-            }],
+            &[
+                super::ProtectedMetadataTarget {
+                    path: command_git.clone(),
+                    mode: super::ProtectedMetadataMode::MissingCreationMonitor,
+                },
+                super::ProtectedMetadataTarget {
+                    path: command_codex.clone(),
+                    mode: super::ProtectedMetadataMode::MissingDenySentinel,
+                },
+            ],
         );
 
         assert_eq!(vec![explicit_deny], deny_write_paths);

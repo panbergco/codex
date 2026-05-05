@@ -122,17 +122,17 @@ pub(crate) struct WindowsProtectedMetadataTarget {
 }
 
 /// Layer: Windows adapter layer. The enforcement layer needs to know whether a
-/// protected metadata path already exists or must be denied before the command
-/// can create it.
+/// protected metadata path already exists, or whether the sandbox should watch
+/// the parent for a command-created metadata object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum WindowsProtectedMetadataMode {
     /// The protected metadata object exists before launch, so the Windows
     /// sandbox should deny writes to the object and any canonical target.
     ExistingDeny,
     /// The protected metadata object is absent before launch, so the Windows
-    /// sandbox should create and deny-list a temporary sentinel before command
-    /// execution can begin.
-    MissingDenySentinel,
+    /// sandbox should listen for filesystem creation events and remove any
+    /// command-created object before reporting the command as denied.
+    MissingCreationMonitor,
 }
 
 fn windows_sandbox_uses_elevated_backend(
@@ -671,8 +671,8 @@ async fn exec_windows_sandbox(
                         WindowsProtectedMetadataMode::ExistingDeny => {
                             codex_windows_sandbox::ProtectedMetadataMode::ExistingDeny
                         }
-                        WindowsProtectedMetadataMode::MissingDenySentinel => {
-                            codex_windows_sandbox::ProtectedMetadataMode::MissingDenySentinel
+                        WindowsProtectedMetadataMode::MissingCreationMonitor => {
+                            codex_windows_sandbox::ProtectedMetadataMode::MissingCreationMonitor
                         }
                     };
                     codex_windows_sandbox::ProtectedMetadataTarget {
@@ -1366,7 +1366,7 @@ fn windows_protected_metadata_mode(path: &AbsolutePathBuf) -> WindowsProtectedMe
         return WindowsProtectedMetadataMode::ExistingDeny;
     }
 
-    WindowsProtectedMetadataMode::MissingDenySentinel
+    WindowsProtectedMetadataMode::MissingCreationMonitor
 }
 
 fn has_reopened_writable_descendant(
