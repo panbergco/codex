@@ -96,6 +96,31 @@ fn turn_defaults_legacy_missing_items_view_to_full() {
 }
 
 #[test]
+fn image_generation_accepts_missing_content_for_legacy_payloads() {
+    let item: ThreadItem = serde_json::from_value(json!({
+        "type": "imageGeneration",
+        "id": "ig_123",
+        "status": "completed",
+        "revisedPrompt": null,
+        "result": "Zm9v",
+        "savedPath": null
+    }))
+    .expect("legacy image generation item should deserialize");
+
+    assert_eq!(
+        item,
+        ThreadItem::ImageGeneration {
+            id: "ig_123".to_string(),
+            status: "completed".to_string(),
+            revised_prompt: None,
+            content: None,
+            result: "Zm9v".to_string(),
+            saved_path: None,
+        }
+    );
+}
+
+#[test]
 fn thread_list_params_accepts_single_cwd() {
     let params = serde_json::from_value::<ThreadListParams>(json!({
         "cwd": "/workspace",
