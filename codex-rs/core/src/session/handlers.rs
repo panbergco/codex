@@ -646,6 +646,7 @@ pub async fn set_thread_memory_mode(sess: &Arc<Session>, sub_id: String, mode: T
 }
 
 pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
+    sess.scheduled_tasks.shutdown();
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
     let _ = sess.conversation.shutdown().await;
     sess.services
@@ -923,6 +924,7 @@ pub(super) async fn submission_loop(
     // If the submission loop exits because the channel closed without an
     // explicit shutdown op, still run process teardown for child processes
     // owned by this session.
+    sess.scheduled_tasks.shutdown();
     sess.services
         .unified_exec_manager
         .terminate_all_processes()

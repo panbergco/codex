@@ -92,6 +92,10 @@ fn test_full_toolset_specs_for_gpt5_codex_unified_exec_web_search() {
         }),
         create_write_stdin_tool(),
         create_update_plan_tool(),
+        create_cron_create_tool(),
+        create_cron_list_tool(),
+        create_cron_delete_tool(),
+        create_schedule_wakeup_tool(),
         request_user_input_tool_spec(&request_user_input_available_modes(&features)),
         create_apply_patch_freeform_tool(),
         ToolSpec::WebSearch {

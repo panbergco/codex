@@ -1,5 +1,6 @@
 use super::*;
 use crate::goals::GoalRuntimeState;
+use crate::scheduled_tasks::ScheduledTasks;
 use codex_protocol::SessionId;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::permissions::FileSystemPath;
@@ -30,6 +31,7 @@ pub(crate) struct Session {
     pub(super) mailbox: Mailbox,
     pub(super) mailbox_rx: Mutex<MailboxReceiver>,
     pub(super) idle_pending_input: Mutex<Vec<ResponseInputItem>>, // TODO (jif) merge with mailbox!
+    pub(crate) scheduled_tasks: Arc<ScheduledTasks>,
     pub(crate) goal_runtime: GoalRuntimeState,
     pub(crate) guardian_review_session: GuardianReviewSessionManager,
     pub(crate) services: SessionServices,
@@ -860,6 +862,7 @@ impl Session {
                 watch::channel(false);
 
             let (mailbox, mailbox_rx) = Mailbox::new();
+            let scheduled_tasks = ScheduledTasks::new(session_configuration.cwd.to_path_buf());
             let sess = Arc::new(Session {
                 conversation_id: thread_id,
                 installation_id,
@@ -875,6 +878,7 @@ impl Session {
                 mailbox,
                 mailbox_rx: Mutex::new(mailbox_rx),
                 idle_pending_input: Mutex::new(Vec::new()),
+                scheduled_tasks,
                 goal_runtime: GoalRuntimeState::new(),
                 guardian_review_session: GuardianReviewSessionManager::default(),
                 services,
@@ -920,6 +924,8 @@ impl Session {
 
             // Start the watcher after SessionConfigured so it cannot emit earlier events.
             sess.start_skills_watcher_listener();
+            sess.scheduled_tasks
+                .start_scheduler(Arc::downgrade(&sess));
             let mut required_mcp_servers: Vec<String> = mcp_servers
                 .iter()
                 .filter(|(_, server)| server.enabled && server.required)

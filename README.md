@@ -10,6 +10,27 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
 
 ---
 
+## Panbergco fork
+
+This fork exists to add Codex-native session scheduling to the CLI while
+keeping the rest of the repository aligned with upstream OpenAI Codex.
+
+Fork version: `codex-cli 0.0.1-panbergco-scheduler.1`
+
+What changed in this fork:
+
+- Adds in-session scheduling tools: `CronCreate`, `CronList`, `CronDelete`,
+  and `ScheduleWakeup`.
+- Scheduled prompts are enqueued back into the currently running Codex session.
+  If a turn is already active, delivery is deferred until the session is idle.
+- Recurring jobs are session-local by default and expire automatically after 7
+  days.
+- Durable jobs are only persisted when requested, using `.codex/scheduled_tasks.json`
+  and `.codex/scheduled_tasks.lock` under the project directory.
+
+Plugin projects remain separate and are not vendored or bundled in this
+repository.
+
 ## Quickstart
 
 ### Installing and running Codex CLI

@@ -3830,6 +3830,9 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         mailbox,
         mailbox_rx: Mutex::new(mailbox_rx),
         idle_pending_input: Mutex::new(Vec::new()),
+        scheduled_tasks: crate::scheduled_tasks::ScheduledTasks::new(
+            session_configuration.cwd.to_path_buf(),
+        ),
         goal_runtime: crate::goals::GoalRuntimeState::new(),
         guardian_review_session: crate::guardian::GuardianReviewSessionManager::default(),
         services,
@@ -5516,6 +5519,9 @@ where
         mailbox,
         mailbox_rx: Mutex::new(mailbox_rx),
         idle_pending_input: Mutex::new(Vec::new()),
+        scheduled_tasks: crate::scheduled_tasks::ScheduledTasks::new(
+            session_configuration.cwd.to_path_buf(),
+        ),
         goal_runtime: crate::goals::GoalRuntimeState::new(),
         guardian_review_session: crate::guardian::GuardianReviewSessionManager::default(),
         services,

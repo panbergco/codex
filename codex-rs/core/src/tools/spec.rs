@@ -79,6 +79,9 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::CodeModeWaitHandler;
     use crate::tools::handlers::ContainerExecHandler;
     use crate::tools::handlers::CreateGoalHandler;
+    use crate::tools::handlers::CronCreateHandler;
+    use crate::tools::handlers::CronDeleteHandler;
+    use crate::tools::handlers::CronListHandler;
     use crate::tools::handlers::DynamicToolHandler;
     use crate::tools::handlers::ExecCommandHandler;
     use crate::tools::handlers::GetGoalHandler;
@@ -91,6 +94,7 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::RequestPermissionsHandler;
     use crate::tools::handlers::RequestPluginInstallHandler;
     use crate::tools::handlers::RequestUserInputHandler;
+    use crate::tools::handlers::ScheduleWakeupHandler;
     use crate::tools::handlers::ShellCommandHandler;
     use crate::tools::handlers::ShellHandler;
     use crate::tools::handlers::TestSyncHandler;
@@ -203,6 +207,15 @@ pub(crate) fn build_specs_with_discoverable_tools(
             ToolHandlerKind::CreateGoal => {
                 builder.register_handler(Arc::new(CreateGoalHandler));
             }
+            ToolHandlerKind::CronCreate => {
+                builder.register_handler(Arc::new(CronCreateHandler));
+            }
+            ToolHandlerKind::CronDelete => {
+                builder.register_handler(Arc::new(CronDeleteHandler));
+            }
+            ToolHandlerKind::CronList => {
+                builder.register_handler(Arc::new(CronListHandler));
+            }
             ToolHandlerKind::DynamicTool => {
                 builder.register_handler(Arc::new(DynamicToolHandler::new(name)));
             }
@@ -255,6 +268,9 @@ pub(crate) fn build_specs_with_discoverable_tools(
             }
             ToolHandlerKind::SendMessageV2 => {
                 builder.register_handler(Arc::new(SendMessageHandlerV2));
+            }
+            ToolHandlerKind::ScheduleWakeup => {
+                builder.register_handler(Arc::new(ScheduleWakeupHandler));
             }
             ToolHandlerKind::Shell => {
                 builder.register_handler(Arc::new(ShellHandler));

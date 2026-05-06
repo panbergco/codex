@@ -1,8 +1,12 @@
+use crate::CRON_CREATE_TOOL_NAME;
+use crate::CRON_DELETE_TOOL_NAME;
+use crate::CRON_LIST_TOOL_NAME;
 use crate::CommandToolOptions;
 use crate::REQUEST_PLUGIN_INSTALL_TOOL_NAME;
 use crate::REQUEST_USER_INPUT_TOOL_NAME;
 use crate::ResponsesApiNamespace;
 use crate::ResponsesApiNamespaceTool;
+use crate::SCHEDULE_WAKEUP_TOOL_NAME;
 use crate::ShellToolOptions;
 use crate::SpawnAgentToolOptions;
 use crate::TOOL_SEARCH_DEFAULT_LIMIT;
@@ -28,6 +32,9 @@ use crate::create_close_agent_tool_v1;
 use crate::create_close_agent_tool_v2;
 use crate::create_code_mode_tool;
 use crate::create_create_goal_tool;
+use crate::create_cron_create_tool;
+use crate::create_cron_delete_tool;
+use crate::create_cron_list_tool;
 use crate::create_followup_task_tool;
 use crate::create_get_goal_tool;
 use crate::create_image_generation_tool;
@@ -41,6 +48,7 @@ use crate::create_request_permissions_tool;
 use crate::create_request_plugin_install_tool;
 use crate::create_request_user_input_tool;
 use crate::create_resume_agent_tool;
+use crate::create_schedule_wakeup_tool;
 use crate::create_send_input_tool_v1;
 use crate::create_send_message_tool;
 use crate::create_shell_command_tool;
@@ -248,6 +256,31 @@ pub fn build_tool_registry_plan(
         );
         plan.register_handler("update_goal", ToolHandlerKind::UpdateGoal);
     }
+
+    plan.push_spec(
+        create_cron_create_tool(),
+        /*supports_parallel_tool_calls*/ false,
+        config.code_mode_enabled,
+    );
+    plan.register_handler(CRON_CREATE_TOOL_NAME, ToolHandlerKind::CronCreate);
+    plan.push_spec(
+        create_cron_list_tool(),
+        /*supports_parallel_tool_calls*/ true,
+        config.code_mode_enabled,
+    );
+    plan.register_handler(CRON_LIST_TOOL_NAME, ToolHandlerKind::CronList);
+    plan.push_spec(
+        create_cron_delete_tool(),
+        /*supports_parallel_tool_calls*/ false,
+        config.code_mode_enabled,
+    );
+    plan.register_handler(CRON_DELETE_TOOL_NAME, ToolHandlerKind::CronDelete);
+    plan.push_spec(
+        create_schedule_wakeup_tool(),
+        /*supports_parallel_tool_calls*/ false,
+        config.code_mode_enabled,
+    );
+    plan.register_handler(SCHEDULE_WAKEUP_TOOL_NAME, ToolHandlerKind::ScheduleWakeup);
 
     plan.push_spec(
         create_request_user_input_tool(request_user_input_tool_description(
