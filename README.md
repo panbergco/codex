@@ -15,7 +15,7 @@ If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="http
 This fork exists to add Codex-native session scheduling to the CLI while
 keeping the rest of the repository aligned with upstream OpenAI Codex.
 
-Fork version: `codex-cli 0.0.1-panbergco-scheduler.1`
+Fork version: `codex-cli 0.128.1-panbergco-scheduler.1`
 
 What changed in this fork:
 
