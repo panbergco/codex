@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::RwLock;
 
 use crate::ExecServerError;
 use crate::ExecServerRuntimePaths;
@@ -36,7 +37,7 @@ pub const CODEX_EXEC_SERVER_URL_ENV_VAR: &str = "CODEX_EXEC_SERVER_URL";
 #[derive(Debug)]
 pub struct EnvironmentManager {
     default_environment: Option<String>,
-    environments: HashMap<String, Arc<Environment>>,
+    environments: RwLock<HashMap<String, Arc<Environment>>>,
     local_environment: Arc<Environment>,
 }
 
@@ -61,10 +62,10 @@ impl EnvironmentManager {
     pub fn default_for_tests() -> Self {
         Self {
             default_environment: Some(LOCAL_ENVIRONMENT_ID.to_string()),
-            environments: HashMap::from([(
+            environments: RwLock::new(HashMap::from([(
                 LOCAL_ENVIRONMENT_ID.to_string(),
                 Arc::new(Environment::default_for_tests()),
-            )]),
+            )])),
             local_environment: Arc::new(Environment::default_for_tests()),
         }
     }
@@ -160,7 +161,7 @@ impl EnvironmentManager {
 
         Self {
             default_environment,
-            environments,
+            environments: RwLock::new(environments),
             local_environment,
         }
     }
@@ -184,7 +185,45 @@ impl EnvironmentManager {
 
     /// Returns a named environment instance.
     pub fn get_environment(&self, environment_id: &str) -> Option<Arc<Environment>> {
-        self.environments.get(environment_id).cloned()
+        self.environments
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(environment_id)
+            .cloned()
+    }
+
+    /// Adds or replaces a named remote environment without changing the
+    /// manager's default environment selection.
+    pub fn upsert_remote_environment(
+        &self,
+        environment_id: String,
+        exec_server_url: String,
+    ) -> Result<(), ExecServerError> {
+        if environment_id.is_empty() {
+            return Err(ExecServerError::Protocol(
+                "environment id cannot be empty".to_string(),
+            ));
+        }
+        let (exec_server_url, disabled) = normalize_exec_server_url(Some(exec_server_url));
+        if disabled {
+            return Err(ExecServerError::Protocol(
+                "remote environment cannot use disabled exec-server url".to_string(),
+            ));
+        }
+        let Some(exec_server_url) = exec_server_url else {
+            return Err(ExecServerError::Protocol(
+                "remote environment requires an exec-server url".to_string(),
+            ));
+        };
+        let environment = Environment::remote_inner(
+            exec_server_url,
+            self.local_environment.local_runtime_paths.clone(),
+        );
+        self.environments
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(environment_id, Arc::new(environment));
+        Ok(())
     }
 }
 
@@ -526,6 +565,45 @@ mod tests {
         let manager = EnvironmentManager::default_for_tests();
 
         assert!(manager.get_environment("does-not-exist").is_none());
+    }
+
+    #[tokio::test]
+    async fn environment_manager_upserts_named_remote_environment() {
+        let manager = EnvironmentManager::disabled_for_tests(test_runtime_paths());
+
+        manager
+            .upsert_remote_environment("executor-a".to_string(), "ws://127.0.0.1:8765".to_string())
+            .expect("remote environment");
+        let first = manager
+            .get_environment("executor-a")
+            .expect("first remote environment");
+        assert!(first.is_remote());
+        assert_eq!(first.exec_server_url(), Some("ws://127.0.0.1:8765"));
+        assert_eq!(manager.default_environment_id(), None);
+
+        manager
+            .upsert_remote_environment("executor-a".to_string(), "ws://127.0.0.1:9876".to_string())
+            .expect("updated remote environment");
+        let second = manager
+            .get_environment("executor-a")
+            .expect("second remote environment");
+        assert!(second.is_remote());
+        assert_eq!(second.exec_server_url(), Some("ws://127.0.0.1:9876"));
+        assert!(!Arc::ptr_eq(&first, &second));
+    }
+
+    #[tokio::test]
+    async fn environment_manager_rejects_empty_remote_environment_url() {
+        let manager = EnvironmentManager::disabled_for_tests(test_runtime_paths());
+
+        let err = manager
+            .upsert_remote_environment("executor-a".to_string(), String::new())
+            .expect_err("empty URL should fail");
+
+        assert_eq!(
+            err.to_string(),
+            "exec-server protocol error: remote environment requires an exec-server url"
+        );
     }
 
     #[tokio::test]
